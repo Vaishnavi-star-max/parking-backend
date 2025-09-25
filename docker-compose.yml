@@ -1,0 +1,92 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres-db:
+    image: postgres:15-alpine
+    container_name: parking-postgres
+    environment:
+      POSTGRES_DB: parking_db
+      POSTGRES_USER: parking_user
+      POSTGRES_PASSWORD: parking_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    networks:
+      - parking-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U parking_user -d parking_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache (Optional)
+  redis-cache:
+    image: redis:7-alpine
+    container_name: parking-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - parking-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # Parking Lot API
+  parking-api:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: parking-api
+    ports:
+      - "8080:8080"
+    environment:
+      # Database Configuration
+      DATABASE_URL: jdbc:postgresql://postgres-db:5432/parking_db
+      DATABASE_USERNAME: parking_user
+      DATABASE_PASSWORD: parking_password
+      
+      # JWT Configuration
+      JWT_SECRET: your_secure_jwt_secret_key_change_in_production
+      JWT_EXPIRATION: 86400000
+      
+      # Redis Configuration
+      REDIS_HOST: redis-cache
+      REDIS_PORT: 6379
+      
+      # Server Configuration
+      SERVER_PORT: 8080
+      LOGGING_LEVEL: INFO
+      
+      # Spring Profiles
+      SPRING_PROFILES_ACTIVE: docker
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+      redis-cache:
+        condition: service_healthy
+    networks:
+      - parking-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  parking-network:
+    driver: bridge
